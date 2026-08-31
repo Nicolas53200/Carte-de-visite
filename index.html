@@ -758,7 +758,7 @@ function qrMatrice(texte,forceMask){
   try{
     var ico=document.querySelector('link[rel="apple-touch-icon"]');
     var man={name:F.entreprise+' — ma carte',short_name:F.entreprise,
-      start_url:location.pathname+'?moi',display:'standalone',
+      start_url:location.pathname+(QUI?'?p='+encodeURIComponent(QUI)+'&moi':'?moi'),display:'standalone',
       background_color:'#080C18',theme_color:'#080C18',
       icons:ico?[{src:ico.href,sizes:'512x512',type:'image/jpeg'}]:[]};
     var lm=document.createElement('link');lm.rel='manifest';
@@ -772,7 +772,7 @@ function qrMatrice(texte,forceMask){
     splash.style.display='none';
     $('roue').classList.add('on');
     $('p-voir').addEventListener('click',function(){
-      location.href=location.pathname;
+      location.href=QUI?location.pathname+'?p='+encodeURIComponent(QUI):location.pathname;
     });
     Array.prototype.forEach.call(document.querySelectorAll('#p-onglets button'),function(b){
       b.addEventListener('click',function(){
