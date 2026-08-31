@@ -131,6 +131,10 @@ button:focus-visible{outline:2px solid var(--nova);outline-offset:3px}
   border-radius:13px;padding:12px 15px;color:var(--texte);font-family:var(--corps);
   font-size:15px;line-height:1.5;resize:vertical}
 .boite textarea:focus{outline:none;border-color:var(--nova)}
+.ok-copie{color:var(--nova);font-size:14px;font-weight:500;margin-top:12px;text-align:center}
+.etapes{margin:14px 0 4px;padding-left:20px;color:#C6D2EC;font-size:14px;line-height:1.6}
+.etapes li{margin-bottom:8px}
+.etapes code,.note code{background:rgba(8,12,24,.6);padding:1px 5px;border-radius:5px;font-size:12.5px}
 .boite .duo{display:flex;gap:9px;margin-top:20px}
 .boite .duo button{flex:1;margin:0}
 .note{font-size:12.5px;color:var(--sourdine);line-height:1.55;margin-top:16px;
@@ -188,6 +192,22 @@ footer{text-align:center;color:#5E6F92;font-size:12.5px;padding-bottom:8px}
    Gardez les guillemets et les virgules.
    ═══════════════════════════════════════════════════ */
 
+/* ═══════════════════════════════════════════════════
+   CONFIGURATION — à remplir une seule fois.
+   Ensuite, les coordonnées se modifient dans le Google
+   Sheet : elles s'enregistrent toutes seules.
+   ═══════════════════════════════════════════════════ */
+
+const CONFIG = {
+  /* Collez ici l'identifiant de votre Google Sheet.
+     Il se trouve dans l'adresse du tableur, entre /d/ et /edit :
+     docs.google.com/spreadsheets/d/ICI_L_IDENTIFIANT/edit  */
+  sheetId: ""
+};
+
+/* Fiche affichée tant que le Google Sheet n'est pas encore
+   configuré. Une fois le tableur en place, elle sert seulement
+   de secours si Google est momentanément injoignable. */
 const FICHE = {
   prenom:     "Marie",
   nom:        "Lambert",
@@ -197,7 +217,6 @@ const FICHE = {
   telephone:  "06 12 34 56 78",
   email:      "m.lambert@ignisnova.fr",
   site:       "ignisnova.fr",
-  motDePasse: "ignis2026",
   adresse:    "",
   pitch:      "On conçoit et on développe des sites et des applications sur mesure, du premier croquis à la mise en ligne."
 };
@@ -220,28 +239,13 @@ const FICHE = {
 
 <div class="reglages" id="reglages">
   <div class="boite">
-    <div id="verrou">
-      <h3>Modifier la fiche</h3>
-      <p>Saisissez le mot de passe pour ouvrir l'éditeur.</p>
-      <input type="password" id="mdp" placeholder="Mot de passe" autocomplete="off">
-      <p class="erreur" id="mdp-err">Mot de passe incorrect.</p>
-      <div class="duo">
-        <button class="second" id="mdp-annuler">Fermer</button>
-        <button class="primaire" id="mdp-ok">Ouvrir</button>
-      </div>
+    <h3>Modifier les coordonnées</h3>
+    <p id="reg-texte">Les coordonnées se modifient dans votre Google Sheet. Ouvrez-le, changez la case voulue : c'est enregistré aussitôt, et la carte se met à jour dans la minute.</p>
+    <div class="duo" style="flex-direction:column">
+      <button class="primaire" id="reg-ouvrir">Ouvrir le Google Sheet</button>
+      <button class="second" id="reg-fermer">Fermer</button>
     </div>
-
-    <div id="editeur" hidden>
-      <h3>Modifier la fiche</h3>
-      <p>Les changements s'appliquent tout de suite à l'écran. Pour qu'ils soient visibles par vos visiteurs, téléchargez le fichier mis à jour et remplacez celui de votre hébergement.</p>
-      <div id="champs"></div>
-      <div class="duo">
-        <button class="second" id="ed-fermer">Fermer</button>
-        <button class="primaire" id="ed-fichier">Télécharger le fichier</button>
-      </div>
-      <p class="note" id="ed-note">Le mot de passe se change à la ligne <code>motDePasse</code> du fichier. Il masque cet éditeur aux visiteurs, mais ne protège rien : le contenu de la page reste lisible par quiconque en affiche le code source.</p>
-      <textarea id="ed-secours" hidden></textarea>
-    </div>
+    <p class="note">Seules les personnes que vous avez ajoutées au tableur peuvent le modifier. C'est votre compte Google qui protège l'accès, il n'y a pas de mot de passe à retenir.</p>
   </div>
 </div>
 
@@ -558,15 +562,50 @@ function qrMatrice(texte,forceMask){
 
 
 (function(){
-  var F=FICHE,$=function(i){return document.getElementById(i)};
-  /* Mode présentation : l'adresse se termine par ?moi — c'est celle que vous
-     ajoutez à votre écran d'accueil. Les visiteurs ouvrent l'adresse sans ?moi. */
+  var F={};for(var k in FICHE)F[k]=FICHE[k];
+  var $=function(i){return document.getElementById(i)};
   var MOI=/(^|[?&])moi(=|&|$)/.test(location.search)||/(^|#)moi$/.test(location.hash);
+
+  /* Quelle personne afficher : ?p=marie dans l'adresse. Par défaut, la première ligne. */
+  var QUI=(location.search.match(/[?&]p=([^&]+)/)||[])[1];
+  if(QUI)QUI=decodeURIComponent(QUI).toLowerCase();
+
+  /* ── Lecture des coordonnées depuis le Google Sheet ──
+     Chaque colonne du tableur porte en en-tête un des noms de FICHE
+     (prenom, nom, telephone, …), plus une colonne "id" pour ?p=. */
+  function chargerSheet(){
+    return new Promise(function(resoudre){
+      if(!CONFIG.sheetId)return resoudre(false);
+      var url='https://docs.google.com/spreadsheets/d/'+CONFIG.sheetId+
+              '/gviz/tq?tqx=out:json&tq&headers=1&nocache='+Date.now();
+      fetch(url).then(function(r){return r.text()}).then(function(t){
+        var json=JSON.parse(t.substring(t.indexOf('{'),t.lastIndexOf('}')+1));
+        var cols=json.table.cols.map(function(c){return (c.label||'').trim().toLowerCase()});
+        var lignes=json.table.rows.map(function(row){
+          var o={};(row.c||[]).forEach(function(cell,i){
+            o[cols[i]]=cell?(cell.v==null?'':String(cell.v)):'';
+          });
+          return o;
+        }).filter(function(o){return (o.prenom||o.nom||o.entreprise)});
+        if(!lignes.length)return resoudre(false);
+        var choisi=QUI&&lignes.filter(function(o){
+          return (o.id||'').toLowerCase()===QUI ||
+                 ((o.prenom||'')+'').toLowerCase()===QUI;
+        })[0];
+        var l=choisi||lignes[0];
+        FICHE_CLES.forEach(function(key){if(l[key]!=null&&l[key]!=='')F[key]=l[key]});
+        resoudre(true);
+      }).catch(function(){resoudre(false)});
+    });
+  }
+  var FICHE_CLES=['prenom','nom','poste','entreprise','accroche','telephone','email','site','adresse','pitch'];
 
   function adressePublique(){
     if(F.adresse)return /^https?:/.test(F.adresse)?F.adresse:'https://'+F.adresse;
-    if(location.protocol==='http:'||location.protocol==='https:')
-      return location.origin+location.pathname;
+    if(location.protocol==='http:'||location.protocol==='https:'){
+      var base=location.origin+location.pathname;
+      return QUI?base+'?p='+encodeURIComponent(QUI):base;
+    }
     return '';
   }
 
@@ -663,6 +702,9 @@ function qrMatrice(texte,forceMask){
     if(MOI)dessinerQR();
   }
   rendu();
+  /* On affiche tout de suite la fiche de secours, puis on la remplace
+     dès que le Google Sheet a répondu — la carte n'attend jamais le réseau. */
+  chargerSheet().then(function(ok){if(ok)rendu()});
 
   function vcard(){
     var l=['BEGIN:VCARD','VERSION:3.0','N:'+F.nom+';'+F.prenom+';;;','FN:'+complet];
@@ -802,64 +844,25 @@ function qrMatrice(texte,forceMask){
     $(i).addEventListener('input',function(){err.style.display='none'});
   });
 
-  /* ─────── Éditeur de la fiche ─────── */
-  var CHAMPS=[
-    ['prenom','Prénom'],['nom','Nom'],['poste','Poste'],['entreprise','Entreprise'],
-    ['accroche','Accroche sous le logo'],['telephone','Téléphone'],['email','E-mail'],
-    ['site','Site'],['pitch','Texte de présentation'],
-    ['adresse','Adresse publique de la carte (pour le QR code)']
-  ];
-  var CLES=['prenom','nom','poste','entreprise','accroche','motDePasse','adresse',
-            'telephone','email','site','pitch'];
+  /* ─────── Panneau « Modifier les coordonnées » ─────── */
   var panneau=$('reglages');
-
+  function lienSheet(){
+    return CONFIG.sheetId
+      ? 'https://docs.google.com/spreadsheets/d/'+CONFIG.sheetId+'/edit'
+      : '';
+  }
   $('roue').addEventListener('click',function(){
+    var l=lienSheet();
+    if(!l){
+      $('reg-texte').textContent="Le Google Sheet n'est pas encore relié. Ajoutez son identifiant à la ligne sheetId du fichier index.html.";
+      $('reg-ouvrir').style.display='none';
+    }
     panneau.classList.add('ouvert');
-    $('mdp-err').style.display='none';$('mdp').value='';
-    setTimeout(function(){$('mdp').focus()},60);
   });
   function fermer(){panneau.classList.remove('ouvert')}
-  $('mdp-annuler').addEventListener('click',fermer);
-  $('ed-fermer').addEventListener('click',fermer);
-
-  function ouvrirEditeur(){
-    $('verrou').hidden=true;$('editeur').hidden=false;
-    $('champs').innerHTML=CHAMPS.map(function(c){
-      var v=String(F[c[0]]||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/"/g,'&quot;');
-      return '<label for="ed-'+c[0]+'">'+c[1]+'</label>'+
-        (c[0]==='pitch'
-          ? '<textarea id="ed-'+c[0]+'">'+v+'</textarea>'
-          : '<input type="text" id="ed-'+c[0]+'" value="'+v+'">');
-    }).join('');
-    CHAMPS.forEach(function(c){
-      $('ed-'+c[0]).addEventListener('input',function(){F[c[0]]=this.value;rendu()});
-    });
-  }
-  $('mdp-ok').addEventListener('click',function(){
-    if($('mdp').value===F.motDePasse){ouvrirEditeur()}
-    else{$('mdp-err').style.display='block'}
-  });
-  $('mdp').addEventListener('keydown',function(e){if(e.key==='Enter')$('mdp-ok').click()});
-
-  function blocConfig(){
-    return 'const FICHE = {\n'+CLES.map(function(k){
-      return '  '+k+': '+JSON.stringify(F[k]===undefined?'':F[k]);
-    }).join(',\n')+'\n};';
-  }
-  $('ed-fichier').addEventListener('click',function(){
-    fetch(location.href,{cache:'no-store'}).then(function(r){return r.text()}).then(function(src){
-      var maj=src.replace(/const FICHE = \{[\s\S]*?\n\};/, function(){return blocConfig()});
-      if(maj===src)throw new Error('bloc introuvable');
-      var b=new Blob([maj],{type:'text/html;charset=utf-8'}),u=URL.createObjectURL(b),a=document.createElement('a');
-      a.href=u;a.download='ma-carte.html';document.body.appendChild(a);a.click();
-      document.body.removeChild(a);setTimeout(function(){URL.revokeObjectURL(u)},1500);
-    }).catch(function(){
-      /* Sur un fichier ouvert en local, le navigateur refuse de relire la page.
-         On affiche alors le bloc à recopier dans le fichier. */
-      var t=$('ed-secours');
-      t.hidden=false;t.value=blocConfig();t.select();
-      $('ed-note').textContent="Téléchargement impossible depuis un fichier local. Copiez le bloc ci-dessus et collez-le à la place de celui du fichier. Une fois la page en ligne, le bouton fonctionnera.";
-    });
+  $('reg-fermer').addEventListener('click',fermer);
+  $('reg-ouvrir').addEventListener('click',function(){
+    var l=lienSheet();if(l)window.open(l,'_blank');
   });
 
   $('envoyer').addEventListener('click',function(){
